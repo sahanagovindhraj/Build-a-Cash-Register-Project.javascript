@@ -1,0 +1,299 @@
+** start of index.html **
+
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Cash Register</title>
+  <style>
+    /* Add your personal style here */
+    body { font-family: Arial, sans-serif; padding: 20px; max-width: 700px; margin: auto; }
+    .row { margin-bottom: 12px; }
+    label { display:block; margin-bottom:6px; }
+    input { padding:8px; width:200px; }
+    #change-due { margin-top: 16px; padding:10px; background:#f1f1f1; border-radius:6px; }
+    button { padding:8px 14px; border-radius:6px; cursor:pointer; }
+  </style>
+</head>
+<body>
+  <h1>Cash Register</h1>
+
+  <!-- Price is global in script.js; change it to test different scenarios -->
+  <div class="row">
+    <label>Cash provided by customer:</label>
+    <input id="cash" type="number" step="0.01" placeholder="Enter cash amount">
+  </div>
+
+  <div class="row">
+    <button id="purchase-btn">Complete Purchase</button>
+  </div>
+
+  <div id="change-due">Change due will appear here</div>
+
+  <script src="script.js"></script>
+</body>
+</html>
+
+
+** end of index.html **
+
+** start of script.js **
+
+// ---------------------------
+// Global variables (tests expect these to exist)
+// You can reassign these with `let` for tests that change them.
+let price = 19.5; // example; tests will override
+let cid = [
+  ["PENNY", 1.01],
+  ["NICKEL", 2.05],
+  ["DIME", 3.1],
+  ["QUARTER", 4.25],
+  ["ONE", 90],
+  ["FIVE", 55],
+  ["TEN", 20],
+  ["TWENTY", 60],
+  ["ONE HUNDRED", 100]
+];
+
+// ---------------------------
+// Helper data and functions
+
+// Denominations in cents (matching order from highest to lowest for making change)
+const DENOMS = [
+  { name: "ONE HUNDRED", val: 10000 },
+  { name: "TWENTY", val: 2000 },
+  { name: "TEN", val: 1000 },
+  { name: "FIVE", val: 500 },
+  { name: "ONE", val: 100 },
+  { name: "QUARTER", val: 25 },
+  { name: "DIME", val: 10 },
+  { name: "NICKEL", val: 5 },
+  { name: "PENNY", val: 1 }
+];
+
+function dollarsToCents(d) {
+  // convert number to integer cents safely
+  return Math.round(Number(d) * 100);
+}
+
+function centsToDollarsString(cents) {
+  const n = Number((cents / 100).toFixed(2));
+  return n.toString(); // this will drop trailing zeros like 0.50 -> "0.5"
+}
+
+// Sum total cash-in-drawer in cents
+function totalCidCents(cidArr) {
+  return cidArr.reduce((sum, pair) => sum + dollarsToCents(pair[1]), 0);
+}
+
+// Convert cid array to a map of cents available per denom (names match DENOMS)
+function cidToMapCents(cidArr) {
+  const map = {};
+  // cidArr is in order from PENNY..ONE HUNDRED (FCC test order)
+  for (let [name, amount] of cidArr) {
+    map[name] = dollarsToCents(amount);
+  }
+  return map;
+}
+
+// ---------------------------
+// Main logic triggered by button
+document.addEventListener("DOMContentLoaded", () => {
+  const purchaseBtn = document.getElementById("purchase-btn");
+  const cashInput = document.getElementById("cash");
+  const changeDueEl = document.getElementById("change-due");
+
+  function setChangeText(text) {
+    changeDueEl.textContent = text;
+  }
+
+  purchaseBtn.addEventListener("click", () => {
+    const cashVal = Number(cashInput.value);
+
+    // Validate numeric input
+    if (isNaN(cashVal)) {
+      alert("Please enter a valid cash amount.");
+      return;
+    }
+
+    const cashCents = dollarsToCents(cashVal);
+    const priceCents = dollarsToCents(price);
+    const changeNeeded = cashCents - priceCents;
+
+    // Customer doesn't have enough money
+    if (changeNeeded < 0) {
+      alert("Customer does not have enough money to purchase the item");
+      return;
+    }
+
+    // Exact cash (no change due)
+    if (changeNeeded === 0) {
+      setChangeText("No change due - customer paid with exact cash");
+      return;
+    }
+
+    // Now we must determine if we can make change using cid
+    const cidTotal = totalCidCents(cid);
+    const cidMap = cidToMapCents(cid);
+
+    // If drawer total is less than change needed -> INSUFFICIENT_FUNDS
+    if (cidTotal < changeNeeded) {
+      setChangeText("Status: INSUFFICIENT_FUNDS");
+      return;
+    }
+
+    // If drawer total equals change needed -> CLOSED (return whole drawer)
+    if (cidTotal === changeNeeded) {
+      // Output status CLOSED followed by each denom amount from highest to lowest
+      // Build a string like "Status: CLOSED PENNY: $0.5" — but only include denominations with non-zero amounts
+      // The tests expect the change to show all funds (which equals change), sorted highest->lowest.
+      const parts = ["Status: CLOSED"];
+      for (let d of DENOMS) {
+        const name = d.name;
+        const availCents = cidMap[name] || 0;
+        if (availCents > 0) {
+          parts.push(`${name}: $${centsToDollarsString(availCents)}`);
+        }
+      }
+      setChangeText(parts.join(" "));
+      return;
+    }
+
+    // Otherwise attempt to make change using largest denominations first
+    let remaining = changeNeeded;
+    const changeGiven = []; // {name, amountCents}
+    for (let d of DENOMS) {
+      const name = d.name;
+      const value = d.val;
+      let amountAvailable = cidMap[name] || 0;
+
+      if (remaining <= 0) break;
+      if (amountAvailable <= 0) continue;
+
+      // How many units of this denom could we use by need
+      const maxNeeded = Math.floor(remaining / value);
+      if (maxNeeded <= 0) continue;
+
+      // How many units available in drawer
+      const unitsAvailable = Math.floor(amountAvailable / value);
+      const unitsToUse = Math.min(maxNeeded, unitsAvailable);
+
+      if (unitsToUse > 0) {
+        const usedCents = unitsToUse * value;
+        changeGiven.push({ name, amountCents: usedCents });
+        remaining -= usedCents;
+        // update map (not necessary further but keeps logic clear)
+        cidMap[name] = amountAvailable - usedCents;
+      }
+    }
+
+    if (remaining > 0) {
+      // We couldn't return exact change
+      setChangeText("Status: INSUFFICIENT_FUNDS");
+      return;
+    }
+
+    // We succeeded: Status OPEN and list change in highest->lowest order
+    const outParts = ["Status: OPEN"];
+    for (let item of changeGiven) {
+      outParts.push(`${item.name}: $${centsToDollarsString(item.amountCents)}`);
+    }
+    setChangeText(outParts.join(" "));
+  });
+});
+
+
+** end of script.js **
+
+** start of styles.css **
+
+/* Reset a little for consistency */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: "Segoe UI", Tahoma, sans-serif;
+  background: #f7f9fc;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  min-height: 100vh;
+  padding: 30px;
+  color: #333;
+}
+
+.container {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.1);
+  padding: 25px 30px;
+  width: 100%;
+  max-width: 480px;
+}
+
+h1 {
+  font-size: 1.8rem;
+  text-align: center;
+  margin-bottom: 20px;
+  color: #2c3e50;
+}
+
+.row {
+  margin-bottom: 16px;
+}
+
+label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+input#cash {
+  width: 100%;
+  padding: 10px;
+  border: 2px solid #ddd;
+  border-radius: 8px;
+  font-size: 1rem;
+  transition: 0.3s;
+}
+
+input#cash:focus {
+  border-color: #3498db;
+  outline: none;
+}
+
+button#purchase-btn {
+  background: #3498db;
+  border: none;
+  color: white;
+  padding: 12px 18px;
+  font-size: 1rem;
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+  width: 100%;
+  transition: background 0.3s;
+}
+
+button#purchase-btn:hover {
+  background: #2980b9;
+}
+
+#change-due {
+  margin-top: 18px;
+  padding: 12px;
+  border-radius: 8px;
+  background: #f1f1f1;
+  font-size: 1rem;
+  font-weight: 500;
+  line-height: 1.4;
+  min-height: 40px;
+  white-space: pre-line;
+}
+
+
+** end of styles.css **
+
